@@ -62,7 +62,7 @@ dbt-lineage-tool/data/manifest.json
 ---
 
 ## 5. Run backend (FastAPI)
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
 
 Backend runs at:
 http://127.0.0.1:8000
@@ -70,7 +70,7 @@ http://127.0.0.1:8000
 ---
 
 ## 6. Run frontend (Streamlit)
-streamlit run ui/streamlit_app.py
+python -m streamlit run ui\streamlit_app.py
 
 UI runs at:
 http://localhost:8501

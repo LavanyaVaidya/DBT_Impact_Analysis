@@ -1,0 +1,15 @@
+# virtual environment
+dbt_lineage_tool_env/
+venv/
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# dbt artifacts (optional if you don’t want to track)
+target/
+dbt_packages/
+
+# OS files
+.DS_Store
