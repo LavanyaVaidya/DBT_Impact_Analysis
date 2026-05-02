@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-sqlglot
-streamlit
-networkx
-pydantic
-dbt-core
