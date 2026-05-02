@@ -2,7 +2,7 @@
 -- Hard‑coded reference (bad practice, bypasses dbt's DAG)
 with src as (
     select *
-    from level1_base   -- direct table name, no {{ ref }}
+    from level1_base   -- direct table name, no {{ ref }} --not able to add in graph
 )
 select id, name, amount + 10 as amount_plus_10
 from src;
