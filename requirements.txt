@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlglot
+streamlit
+matplotlib
+pydantic
+dbt-core
+pyvis
+pydot 
+graphviz
+dbt-duckdb

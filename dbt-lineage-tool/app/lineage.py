@@ -1,6 +1,7 @@
 import sqlglot
 from sqlglot import exp
 from collections import defaultdict
+from app.violations import ViolationDetector
 
 
 class LineageEngine:
@@ -55,6 +56,24 @@ class LineageEngine:
                 print(f"[LINEAGE] SQL parse error in {model}: {e}")
 
         print(f"[LINEAGE] Graph built with {len(self.graph)} nodes")
+
+        # -------------------------------------------------
+        # 3. HARD‑CODED TABLE DETECTION
+        # -------------------------------------------------
+        # Use ViolationDetector in raw‑SQL mode to find tables that are
+        # referenced as literal strings instead of dbt refs. Those
+        # tables are added as upstream nodes so that downstream impact
+        # includes them.
+        # Build a lookup from model base name to full manifest identifier
+        name_to_key = {v["name"]: k for k, v in self.loader.get_models().items()}
+        detector = ViolationDetector(self.loader, use_raw=True)
+        for model_key in self.loader.get_models().keys():
+            hardcoded = detector.get_violations(model_key, use_raw=True)
+            for table in hardcoded:
+                # Resolve to full model identifier if it matches a known dbt model
+                upstream_key = name_to_key.get(table, table)
+                self.graph[upstream_key].add(model_key)
+                self.reverse_graph[model_key].add(upstream_key)
 
     def subgraph_edges(self, model):
         """Return a dict of edges (upstream -> downstream) for the sub‑graph reachable from *model*.

@@ -4,12 +4,14 @@ venv/
 .env
 
 # Python cache
-__pycache__/
+*__pycache__/
 *.pyc
+*.json
 
 # dbt artifacts (optional if you don’t want to track)
-target/
-dbt_packages/
+dbt_project/target/
+dbt_project/logs/
+dbt_project/dbt_packages/
 
 # OS files
 .DS_Store
