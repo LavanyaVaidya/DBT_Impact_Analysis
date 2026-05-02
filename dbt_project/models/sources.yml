@@ -1,0 +1,6 @@
+version: 2
+sources:
+  - name: raw
+    tables:
+      - name: raw_level1
+        description: Raw level1 data imported from external system.
