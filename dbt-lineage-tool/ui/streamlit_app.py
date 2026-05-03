@@ -1,126 +1,120 @@
 import streamlit as st
-import streamlit.components.v1 as components
-import networkx as nx
-import matplotlib.pyplot as plt
-import io
+import requests
 
+st.set_page_config(layout="wide")
 st.title("DBT Impact Analysis")
 
 BASE = "http://127.0.0.1:8000"
 
 tab1, tab2 = st.tabs(["Impact Analysis", "Violations"])
 
+# Initialize session state for persistence
+if "impact_data" not in st.session_state:
+    st.session_state["impact_data"] = None
+if "view_mode" not in st.session_state:
+    st.session_state["view_mode"] = "Graph"
+
 # -------------------------
 # IMPACT TAB
 # -------------------------
 with tab1:
+    try:
+        # Load models and columns
+        models = requests.get(f"{BASE}/models").json()
+        selected_model = st.selectbox("Select Model", models)
 
-    import requests
+        columns = requests.get(f"{BASE}/columns/{selected_model}").json()
+        selected_column = st.selectbox("Select Column", columns)
+    except Exception as e:
+        st.error(f"Backend Connection Error: {e}")
+        st.stop()
 
-    models = requests.get(f"{BASE}/models").json()
-    selected_model = st.selectbox("Select Model", models)
-
-    columns = requests.get(f"{BASE}/columns/{selected_model}").json()
-    selected_column = st.selectbox("Select Column", columns)
-
-    if st.button("Check Impact"):
+    if st.button("Check Impact", type="primary"):
         response = requests.get(
             f"{BASE}/impact",
             params={"model": selected_model, "column": selected_column},
         )
+        if response.status_code == 200:
+            st.session_state["impact_data"] = response.json()
+            # Force view to graph on new search
+            st.session_state["view_mode"] = "Graph"
+        else:
+            st.error("Error fetching impact data.")
 
-        try:
-            data = response.json()
-        except Exception:
-            data = {"error": response.text}
-
-        st.session_state["impact_data"] = data
-        st.session_state["view_mode"] = "Graph"
-
-    if st.session_state.get("impact_data"):
-
-        col_graph, col_list = st.columns(2)
-
-        with col_graph:
-            if st.button("Graph"):
+    # Only show results if we have data
+    if st.session_state["impact_data"]:
+        st.divider()
+        
+        # Toggle Buttons
+        c1, c2 = st.columns([1, 10])
+        with c1:
+            if st.button("Graph View"):
                 st.session_state["view_mode"] = "Graph"
-
-        with col_list:
-            if st.button("List"):
+        with c2:
+            if st.button("List View"):
                 st.session_state["view_mode"] = "List"
 
-        if st.session_state.get("view_mode") == "Graph":
-
+        if st.session_state["view_mode"] == "Graph":
             edges = st.session_state["impact_data"].get("edges", {})
+            
+            if not edges:
+                st.info("No downstream dependencies found for this column selection.")
+            else:
+                # DOT language for Graphviz
+                # ranksep adds horizontal space; nodesep adds vertical space
+                dot_code = f"""
+                digraph G {{
+                    rankdir="LR";
+                    graph [ranksep="1.8", nodesep="0.5", pad="0.5"];
+                    node [shape=box, style="filled,rounded", color="#AED6F1", 
+                          fontname="Helvetica", fontsize=11, margin="0.2,0.1"];
+                    edge [color="#5D6D7E", arrowhead=vee, arrowsize=0.8];
 
-            G = nx.DiGraph()
+                    # The source model
+                    "{selected_model}" [fillcolor="#3498DB", fontcolor=white, style="filled,bold"];
+                """
 
-            for upstream, downs in edges.items():
-                for dep in downs:
-                    G.add_edge(upstream, dep)
-
-            # -------------------------
-            # CLEAN LEFT → RIGHT LAYOUT
-            # -------------------------
-            try:
-                from networkx.drawing.nx_agraph import graphviz_layout
-                pos = graphviz_layout(G, prog="dot")
-            except:
-                pos = nx.spring_layout(G, seed=42)
-
-            fig, ax = plt.subplots(figsize=(12, 6))
-            nx.draw(
-                G,
-                pos,
-                with_labels=True,
-                node_color="lightblue",
-                node_size=2000,
-                arrows=True,
-                font_size=8,
-                ax=ax
-            )
-
-            st.pyplot(fig)
+                # Build the relationships
+                for upstream, downs in edges.items():
+                    for dep in downs:
+                        dot_code += f'    "{upstream}" -> "{dep}";\n'
+                
+                dot_code += "}"
+                
+                # Render with container_width=True to fix the "squished" issue
+                st.graphviz_chart(dot_code, use_container_width=True)
 
         else:
-            st.json(st.session_state["impact_data"])
+            # List Section
+            st.subheader("Downstream Impact List")
+            impacted_list = st.session_state["impact_data"].get("impacted_nodes", [])
+            if impacted_list:
+                for item in impacted_list:
+                    st.text(f"• {item}")
+            
+            with st.expander("View Raw JSON"):
+                st.json(st.session_state["impact_data"])
 
 # -------------------------
 # VIOLATIONS TAB
 # -------------------------
 with tab2:
     st.subheader("🚩 Policy Audit: Hardcoded References")
-    st.info("This check identifies models using raw table names (e.g., `schema.table`) instead of the required `{{ ref() }}` or `{{ source() }}` macros.")
-
-    if st.button("Run Violation Scan", type="primary"):
-        with st.spinner("Scanning SQL manifests..."):
-            res = requests.get(f"{BASE}/violations")
-            
-            if res.status_code == 200:
-                violations = res.json()  # Expected format: {"model_name": ["table1", "table2"]}
-                
-                if not violations:
-                    st.success("✅ No violations found! All models are using proper dbt references.")
-                else:
-                    # 1. Summary Metrics
-                    total_violations = sum(len(tables) for tables in violations.values())
-                    col1, col2 = st.columns(2)
-                    col1.metric("Impacted Models", len(violations))
-                    col2.metric("Hardcoded Tables Found", total_violations, delta_color="inverse")
-
-                    st.divider()
-
-                    # 2. Detailed Report
-                    st.markdown("### Detailed Violation Log")
-                    
-                    for model, bad_tables in violations.items():
-                        # Create a nice expander for each model
-                        with st.expander(f"🔴 {model}"):
-                            st.write("**Detected Hardcoded Tables:**")
-                            
-                            # Display as a bulleted list or a small table
-                            for table in bad_tables:
-                                st.code(f"SELECT * FROM {table}", language="sql")
+    
+    if st.button("Run Violation Scan"):
+        res = requests.get(f"{BASE}/violations")
+        if res.status_code == 200:
+            violations = res.json()
+            if not violations:
+                st.success("✅ No violations found!")
             else:
-                st.error(f"Failed to fetch violations. Backend returned: {res.status_code}")
-                st.write(res.text)
+                total_v = sum(len(tables) for tables in violations.values())
+                m1, m2 = st.columns(2)
+                m1.metric("Impacted Models", len(violations))
+                m2.metric("Hardcoded Tables", total_v)
+                
+                for model, tables in violations.items():
+                    with st.expander(f"📍 {model}"):
+                        st.table({"Hardcoded Table References": tables})
+        else:
+            st.error("Could not fetch violations.")
