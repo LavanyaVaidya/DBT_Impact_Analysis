@@ -59,6 +59,10 @@ dbt_project/target/manifest.json
 Paste into:
 dbt-lineage-tool/data/manifest.json
 
+OR
+
+In the main.py point directly to manifest.json location in your dbt_project folder.
+
 ---
 
 ## 5. Run backend (FastAPI)

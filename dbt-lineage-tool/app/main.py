@@ -3,7 +3,7 @@ from app.parser import ManifestLoader
 from app.lineage import LineageEngine
 from app.violations import ViolationDetector
 
-loader = ManifestLoader("data/manifest.json")
+loader = ManifestLoader("../dbt_project/target/manifest.json")
 
 engine = LineageEngine(loader)
 engine.build()
