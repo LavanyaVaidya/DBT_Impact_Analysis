@@ -26,10 +26,10 @@ def columns(model: str):
 
 @app.get("/impact")
 def impact(model: str, column: str):
-    # Get downstream models (transitive)
+    # Pass column to both functions
     downstream_models = engine.downstream(model, column)
-    # Get the true edge set for the reachable sub‑graph
-    edges = engine.subgraph_edges(model)
+    edges = engine.subgraph_edges(model, column=column) 
+    
     return {
         "downstream": downstream_models,
         "edges": edges,

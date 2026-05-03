@@ -75,47 +75,112 @@ class LineageEngine:
                 self.graph[upstream_key].add(model_key)
                 self.reverse_graph[model_key].add(upstream_key)
 
-    def subgraph_edges(self, model):
-        """Return a dict of edges (upstream -> downstream) for the sub‑graph reachable from *model*.
-        The result includes both direct and indirect connections, preserving the true DAG structure.
+    def subgraph_edges(self, model, column=None):
         """
-        # First get all reachable nodes using the existing downstream traversal
-        reachable = set(self.downstream(model))
-        # Include the starting model itself so we capture its outgoing edges
+        Builds the visual graph edges based on the specific column filter.
+        """
+        reachable = set(self.downstream(model, column))
         reachable.add(model)
+        
         edges = {}
         for upstream in reachable:
             downs = self.graph.get(upstream, set())
-            # Keep only downstream nodes that are also in the reachable set
+            # Only keep edges that exist within our filtered reachable set
             filtered = {d for d in downs if d in reachable}
             if filtered:
                 edges[upstream] = list(filtered)
         return edges
 
+    def downstream(self, model_key, column=None):
+        """
+        Calculates downstream impact with CTE-aware column and star analysis.
+        """
+        visited = set()
+        stack = [model_key]
+        impacted_nodes = []
+        
+        target_col = column.lower() if column else None
+        # Extract base name (e.g., 'model.project.a' -> 'a')
+        source_model_name = model_key.split('.')[-1].lower()
 
-    def downstream(self, model, column=None):
-        """
-        Model-level impact (stable + production-safe)
-        """
-        visited = set()
-        stack = [model]
+        print(f"\n{'='*80}")
+        print(f"ANALYSIS: [{model_key}] | Column: [{column}]")
+        print(f"{'='*80}")
+
         while stack:
-            current = stack.pop()
-            for downstream in self.graph.get(current, []):
-                if downstream not in visited:
-                    visited.add(downstream)
-                    stack.append(downstream)
-        return list(visited)
-    def upstream(self, model):
-        """
-        Optional reverse lineage (useful for debugging)
-        """
-        visited = set()
-        stack = [model]
-        while stack:
-            current = stack.pop()
-            for upstream in self.reverse_graph.get(current, []):
-                if upstream not in visited:
-                    visited.add(upstream)
-                    stack.append(upstream)
-        return list(visited)
+            current_node = stack.pop()
+            # The name of the node we are currently checking for as an upstream
+            current_upstream_name = current_node.split('.')[-1].lower()
+            
+            downstream_models = self.graph.get(current_node, [])
+
+            for ds_key in downstream_models:
+                if ds_key in visited:
+                    continue
+
+                print(f"\n[ANALYZING] {ds_key}")
+
+                if not target_col:
+                    print(f"  --> MATCH: Model-level change.")
+                    visited.add(ds_key)
+                    impacted_nodes.append(ds_key)
+                    stack.append(ds_key)
+                    continue
+
+                sql = self.loader.get_sql(ds_key)
+                if not sql:
+                    continue
+
+                try:
+                    parsed = sqlglot.parse_one(sql)
+                    
+                    # --- CHECK A: Explicit Column Usage ---
+                    column_usage_found = False
+                    for col in parsed.find_all(exp.Column):
+                        if col.name.lower() == target_col:
+                            c_table = col.table.lower() if col.table else ""
+                            # Match if table-less or specifically matching current upstream
+                            if not c_table or c_table == current_upstream_name:
+                                column_usage_found = True
+                                break
+
+                    # --- CHECK B: Scope-Aware Star Selection (*) ---
+                    star_impact = False
+                    for star in parsed.find_all(exp.Star):
+                        # Find the SELECT statement wrapping this star
+                        parent_select = star.find_ancestor(exp.Select)
+                        
+                        if parent_select:
+                            # Look at what tables this specific SELECT/CTE is pulling from
+                            tables_in_scope = [t.name.lower() for t in parent_select.find_all(exp.Table)]
+                            
+                            print(f"    [DEBUG] Found Star. Scope Tables: {tables_in_scope}")
+                            
+                            # If this scope (CTE or subquery) uses our upstream model, the * is a match
+                            if current_upstream_name in tables_in_scope:
+                                print(f"    [DEBUG] Match: Star pulls from upstream '{current_upstream_name}'")
+                                star_impact = True
+                                break
+                        
+                        # Fallback for prefixed stars like 'level4_a.*'
+                        parent_col = star.parent
+                        if isinstance(parent_col, exp.Column) and parent_col.table.lower() == current_upstream_name:
+                            star_impact = True
+                            break
+
+                    if column_usage_found or star_impact:
+                        reason = "Column Match" if column_usage_found else "Star Match"
+                        print(f"  --> RESULT: MATCH ({reason})")
+                        visited.add(ds_key)
+                        impacted_nodes.append(ds_key)
+                        stack.append(ds_key)
+                    else:
+                        print(f"  --> RESULT: NO MATCH")
+
+                except Exception as e:
+                    print(f"  --> [ERROR] Parsing failed: {e}. Defaulting to impacted.")
+                    visited.add(ds_key)
+                    impacted_nodes.append(ds_key)
+                    stack.append(ds_key)
+
+        return impacted_nodes
