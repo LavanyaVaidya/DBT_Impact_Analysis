@@ -89,8 +89,38 @@ with tab1:
 # VIOLATIONS TAB
 # -------------------------
 with tab2:
+    st.subheader("🚩 Policy Audit: Hardcoded References")
+    st.info("This check identifies models using raw table names (e.g., `schema.table`) instead of the required `{{ ref() }}` or `{{ source() }}` macros.")
 
-    if st.button("Check Hardcoded Tables"):
-        res = requests.get(f"{BASE}/violations")
-        st.write("STATUS:", res.status_code)
-        st.write("TEXT:", res.text)
+    if st.button("Run Violation Scan", type="primary"):
+        with st.spinner("Scanning SQL manifests..."):
+            res = requests.get(f"{BASE}/violations")
+            
+            if res.status_code == 200:
+                violations = res.json()  # Expected format: {"model_name": ["table1", "table2"]}
+                
+                if not violations:
+                    st.success("✅ No violations found! All models are using proper dbt references.")
+                else:
+                    # 1. Summary Metrics
+                    total_violations = sum(len(tables) for tables in violations.values())
+                    col1, col2 = st.columns(2)
+                    col1.metric("Impacted Models", len(violations))
+                    col2.metric("Hardcoded Tables Found", total_violations, delta_color="inverse")
+
+                    st.divider()
+
+                    # 2. Detailed Report
+                    st.markdown("### Detailed Violation Log")
+                    
+                    for model, bad_tables in violations.items():
+                        # Create a nice expander for each model
+                        with st.expander(f"🔴 {model}"):
+                            st.write("**Detected Hardcoded Tables:**")
+                            
+                            # Display as a bulleted list or a small table
+                            for table in bad_tables:
+                                st.code(f"SELECT * FROM {table}", language="sql")
+            else:
+                st.error(f"Failed to fetch violations. Backend returned: {res.status_code}")
+                st.write(res.text)
